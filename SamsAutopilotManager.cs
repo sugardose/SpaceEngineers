@@ -1,9 +1,9 @@
 // Sam's Autopilot Manager
-public static string VERSION = "1.0.0";
+public static string VERSION = "1.0.1";
 //
-// Documentation:
+// Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1224507423
 // 
-// Github:
+// Github: https://github.com/sugardose/SpaceEngineers
 //
 // Owner: Sam
 // Contributors:
@@ -120,7 +120,7 @@ public List<Waypoint> GenerateApproach(DockMetadata metadata) {
         var currentBackward = this.controlBlock.WorldMatrix.Backward;
         var makeSpaceWaypoint = this.currentPosition + (lineup * currentUp) + (lineup * currentBackward);
         list.Add(new Waypoint(false, true, true, 100.0f, makeSpaceWaypoint));
-        this.Log("Near a Dock - widrawing backwards");
+        this.Log("Near a Dock - withdrawing backwards");
     }
 
     var directionWaypoint = metadata.position + (-this.LINEUP_DISTANCE * metadata.front) + (this.LINEUP_DISTANCE * metadata.up);
@@ -384,7 +384,7 @@ public void PrintToNavigationPanels() {
         var destinationWaypointDistance = Vector3D.Distance(this.waypoints.Last().position, currentPosition).ToString("F1") + "m";
         str += " " + this.autopilotDestination + new String(' ', 12 + Program.NATO_MAX_CODE_SIZE - this.autopilotDestination.Length - destinationWaypointDistance.Length) + destinationWaypointDistance + "\n";
         str += " " + this.rotator.GetString() + " ";
-        if (this.waypoints.Count() >= 5) str += "widrawing...";
+        if (this.waypoints.Count() >= 5) str += "withdrawing...";
         else if (this.waypoints.Count() >= 4) str += "navigating...";
         else if (this.waypoints.Count() >= 2) str += "lining up...";
         else str += "approaching...";
