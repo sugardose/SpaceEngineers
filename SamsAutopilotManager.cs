@@ -1,12 +1,12 @@
 // Sam's Autopilot Manager
-public static string VERSION = "1.0.1";
+public static string VERSION = "1.1.0";
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1224507423
 // 
 // Github: https://github.com/sugardose/SpaceEngineers
 //
 // Owner: Sam
-// Contributors:
+// Contributors: Cameron Leger
 
 
 // Change the tag used to identify blocks        
@@ -74,6 +74,7 @@ public void Update10() {
 public void Update100() {
     try { this.ScanControlBlock(); } catch (Exception e) { this.Log("Update100 ScanControlBlock exception: " + e.Message); }
     try { this.ScanCameraBlock(); } catch (Exception e) { this.Log("Update100 ScanCameraBlock exception: " + e.Message); }
+    try { this.ScanConnectors(); } catch (Exception e) { this.Log("Update100 ScanConnectors exception: " + e.Message); }
     try { this.ScanPanels(); } catch (Exception e) { this.Log("Update100 ScanPanels exception: " + e.Message); }
     try { this.ScanProgramableBlocks(); } catch (Exception e) { this.Log("Update100 ScanProgramableBlocks exception: " + e.Message); }
     if (this.HasDiagnosticsPanels())
@@ -158,6 +159,44 @@ public void StopRemoteAutopilot() {
 
 // Remote configuration
 // -------------------------------------------------------
+// Connecting
+
+public void Connect()
+{
+    if (this.connectors.Count() == 0)
+    {
+        this.Log("Connecting aborted - no connectors configured");
+        return;
+    }
+    foreach (IMyShipConnector connector in this.connectors)
+    {
+        if (connector.Status == MyShipConnectorStatus.Connectable)
+        {
+            this.Log("Connecting");
+            connector.Connect();
+        }
+    }
+}
+
+public void Disconnect()
+{
+    if (this.connectors.Count() == 0)
+    {
+        this.Log("Disconnecting aborted - no connectors configured");
+        return;
+    }
+    foreach (IMyShipConnector connector in this.connectors)
+    {
+        if (connector.Status == MyShipConnectorStatus.Connected)
+        {
+            this.Log("Disconnecting");
+            connector.Disconnect();
+        }
+    }
+}
+
+// Docking
+// -------------------------------------------------------
 // Navigation interface
 
 public bool autopilotRunning;
@@ -173,6 +212,7 @@ public void NavigateStart() {
         this.Log("Not in a planet");
         return;
     }
+    this.Disconnect();
     this.Log("Starting navigation to " + this.docksConfigured[this.dockSelected]);
     this.autopilotRunning = true;
     this.autopilotDestination = this.docksConfigured[this.dockSelected];
@@ -589,6 +629,7 @@ public void CheckNotify() {
         var now = DateTime.Now;
         if (n.when > DateTime.Now) continue;
         var message = n.notification;
+        if (message.Equals("DOCK FINISH")) this.Connect();
         remove.Add(n);
         if (!this.HasProgrammableBlocks()) continue;
         this.Log("Notifying blocks for: " + n.notification);
@@ -666,6 +707,7 @@ public void DockDelete() {
 
 public IMyRemoteControl controlBlock;
 public IMyCameraBlock cameraBlock;
+public List<IMyShipConnector> connectors = new List<IMyShipConnector>();
 public List<IMyTextPanel> navigationPanels = new List<IMyTextPanel>();
 public List<IMyTextPanel> gpsPanels = new List<IMyTextPanel>();
 public List<IMyTextPanel> diagnosticsPanels = new List<IMyTextPanel>();
@@ -674,6 +716,7 @@ public List<IMyProgrammableBlock> programableBlocks = new List<IMyProgrammableBl
 
 public bool HasControlBlock() { return this.controlBlock != null; }
 public bool HasCameraBlock() { return this.cameraBlock != null; }
+public bool HasConnectors() { return this.connectors.Count() != 0; }
 public bool HasNavigationPanels() { return this.navigationPanels.Count() != 0; }
 public bool HasGpsPanels() { return this.gpsPanels.Count() != 0; }
 public bool HasDiagnosticsPanels() { return this.diagnosticsPanels.Count() != 0; }
@@ -722,6 +765,20 @@ public void ScanCameraBlock() {
     if (firstCameraScan) {
         this.Log("Unable to find a Camera");
         firstCameraScan = false;
+    }
+}
+
+public void ScanConnectors()
+{
+    this.connectors.Clear();
+    List<IMyShipConnector> blocks = new List<IMyShipConnector>();
+    GridTerminalSystem.GetBlocksOfType<IMyShipConnector>(blocks, b => b.CubeGrid == Me.CubeGrid);
+    foreach (IMyShipConnector block in blocks)
+    {
+        var match = Program.tagRegex.Match(block.CustomName);
+        if (!match.Success) continue;
+        Program.FixNameTag(block, match.Groups[1].Value, "");
+        this.connectors.Add(block);
     }
 }
 
