@@ -6,8 +6,13 @@ public static string VERSION = "1.1.0";
 // Github: https://github.com/sugardose/SpaceEngineers
 //
 // Owner: Sam
-// Contributors: Cameron Leger
-
+// Contributors:
+//  Cameron Leger
+//
+// Latest changes:
+//  - Added support for enabling and disabling connectors automatically;
+//  - Added support for notifying Timers with START/TRIGGER
+        
 
 // Change the tag used to identify blocks        
 public static string TAG = "SAM";
@@ -42,15 +47,17 @@ public void HandleCommand(string command) {
                     case "PREV": this.DockSelectPrev(); break;
                     case "NEXT": this.DockSelectNext(); break;
                     default: this.Log("Unknown " + arg0 + " argument ->" + arg1 + "<-"); break;
-                } break;
+                }
+                break;
             case "NAV":
                 switch (arg1) {
                     case "START": this.NavigateStart(); break;
                     case "STOP": this.NavigateStop(); break;
                     case "NEAR": this.NavigateNearest(); break;
                     case "FAR": this.NavigateFarthest(); break;
-                    default: this.Log("Unknown " + arg0 +" argument ->" + arg1 + "<-"); break;
-                } break;
+                    default: this.Log("Unknown " + arg0 + " argument ->" + arg1 + "<-"); break;
+                }
+                break;
             case "DIAG":
                 this.diagnosticsTabs.Move(0, this.diagnosticsTabs.Count() - 1);
                 break;
@@ -74,9 +81,9 @@ public void Update10() {
 public void Update100() {
     try { this.ScanControlBlock(); } catch (Exception e) { this.Log("Update100 ScanControlBlock exception: " + e.Message); }
     try { this.ScanCameraBlock(); } catch (Exception e) { this.Log("Update100 ScanCameraBlock exception: " + e.Message); }
-    try { this.ScanConnectors(); } catch (Exception e) { this.Log("Update100 ScanConnectors exception: " + e.Message); }
     try { this.ScanPanels(); } catch (Exception e) { this.Log("Update100 ScanPanels exception: " + e.Message); }
     try { this.ScanProgramableBlocks(); } catch (Exception e) { this.Log("Update100 ScanProgramableBlocks exception: " + e.Message); }
+    try { this.ScanConnectors(); } catch (Exception e) { this.Log("Update100 ScanConnectors exception: " + e.Message); }
     if (this.HasDiagnosticsPanels())
         try { this.ScanThrusters(); } catch (Exception e) { this.Log("Update100 ScanThrusters exception: " + e.Message); }
 }
@@ -146,7 +153,7 @@ public void ConfigureRemote() {
     this.controlBlock.FlightMode = FlightMode.OneWay;
     this.controlBlock.SpeedLimit = wp.maxSpeed;
     this.controlBlock.SetDockingMode(wp.dockingMode);
-    this.controlBlock.Direction = (wp.reverse)?(Base6Directions.Direction.Backward):(Base6Directions.Direction.Forward);
+    this.controlBlock.Direction = (wp.reverse) ? (Base6Directions.Direction.Backward) : (Base6Directions.Direction.Forward);
     this.controlBlock.ControlThrusters = true;
     this.controlBlock.DampenersOverride = true;
     this.controlBlock.SetAutoPilotEnabled(true);
@@ -158,44 +165,6 @@ public void StopRemoteAutopilot() {
 }
 
 // Remote configuration
-// -------------------------------------------------------
-// Connecting
-
-public void Connect()
-{
-    if (this.connectors.Count() == 0)
-    {
-        this.Log("Connecting aborted - no connectors configured");
-        return;
-    }
-    foreach (IMyShipConnector connector in this.connectors)
-    {
-        if (connector.Status == MyShipConnectorStatus.Connectable)
-        {
-            this.Log("Connecting");
-            connector.Connect();
-        }
-    }
-}
-
-public void Disconnect()
-{
-    if (this.connectors.Count() == 0)
-    {
-        this.Log("Disconnecting aborted - no connectors configured");
-        return;
-    }
-    foreach (IMyShipConnector connector in this.connectors)
-    {
-        if (connector.Status == MyShipConnectorStatus.Connected)
-        {
-            this.Log("Disconnecting");
-            connector.Disconnect();
-        }
-    }
-}
-
-// Docking
 // -------------------------------------------------------
 // Navigation interface
 
@@ -212,7 +181,8 @@ public void NavigateStart() {
         this.Log("Not in a planet");
         return;
     }
-    this.Disconnect();
+    this.ConnectorsDisconnect();
+    this.NotifyDelay("NAV START", 0);
     this.Log("Starting navigation to " + this.docksConfigured[this.dockSelected]);
     this.autopilotRunning = true;
     this.autopilotDestination = this.docksConfigured[this.dockSelected];
@@ -239,7 +209,7 @@ public void NavigateStop() {
     this.Log("Stopping navigation");
     this.autopilotRunning = false;
     if (!this.HasControlBlock()) return;
-        this.StopRemoteAutopilot();
+    this.StopRemoteAutopilot();
 }
 
 // Navigation interface
@@ -314,10 +284,10 @@ public void NextWaypoint(bool approach) {
     this.waypoints.RemoveAt(0);
     if (this.waypoints.Count() == 0) {
         this.NavigateStop();
-        this.NotifyDelay("DOCK FINISH", 3.0);
+        this.NotifyDelay("NAV STOP", 3.0);
         return;
-    } else if(this.waypoints.Count() == 1) {
-        this.NotifyDelay("DOCK APPROACH", 0);
+    } else if (this.waypoints.Count() == 1) {
+        this.NotifyDelay("NAV APPROACH", 0);
     }
 
     this.Log(approach ? "Starting approach" : "Navigating to next waypoint");
@@ -361,10 +331,10 @@ public void NavigationMonitor() {
 // Thruster information
 
 public Dictionary<string, Dictionary<string, TrustInfo>> thrustInfo = new Dictionary<string, Dictionary<string, TrustInfo>>() {
-    { "Hydrogen", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
-    { "Ion", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
-    { "Atmospheric", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
-    { "All thrusters", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
+{ "Hydrogen", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
+{ "Ion", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
+{ "Atmospheric", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
+{ "All thrusters", new Dictionary<string, TrustInfo>() { {"Forward", new TrustInfo(0.0f, 0.0f)}, { "Backward", new TrustInfo(0.0f, 0.0f)}, { "Up", new TrustInfo(0.0f, 0.0f)}, { "Down", new TrustInfo(0.0f, 0.0f)}, { "Left", new TrustInfo(0.0f, 0.0f)}, { "Right", new TrustInfo(0.0f, 0.0f)} } },
 };
 
 public void ClearTrustInfo() {
@@ -510,12 +480,12 @@ public void PrintToDiagnosticsPanels() {
             " acceleration also take in\n" +
             " consideration the Natural\n" +
             " Gravity. E.g.:\n" +
-            "  DOWNacc > gravity + " +  Program.THRUST_MIN_ACCELERATION.ToString("F0");
+            "  DOWNacc > gravity + " + Program.THRUST_MIN_ACCELERATION.ToString("F0");
         Program.Print(this.diagnosticsPanels, sub);
         return;
     }
 
-    if(selectedTab == "Ship dimensions") {
+    if (selectedTab == "Ship dimensions") {
         var sub = selectedTab + "\n";
         sub += Me.CubeGrid.GridSize.ToString() + "\n";
         sub += Me.CubeGrid.WorldVolume.Radius.ToString() + "\n";
@@ -558,7 +528,7 @@ public void PrintToDiagnosticsPanels() {
         if (entry.Key == "Right" || entry.Key == "Left") {
             str2 += new String(' ', 7 - acceleration.Length);
             str2 += acceleration;
-        }else if (entry.Key == "Downwards") {
+        } else if (entry.Key == "Downwards") {
             var notSuitable = (entry.Value.effective / totalMass) <= (Program.THRUST_MIN_ACCELERATION + gravity);
             if (notSuitable && this.diagnosticsBlink) {
                 str2 += new String(' ', 7);
@@ -609,7 +579,7 @@ public List<string> logger = new List<string>();
 public void Log(string str) {
     Echo(str);
     this.logger.Add(str);
-    if(this.logger.Count()>Program.LOG_MAX_LINES) this.logger.RemoveAt(0);
+    if (this.logger.Count() > Program.LOG_MAX_LINES) this.logger.RemoveAt(0);
 }
 
 // Logging
@@ -623,22 +593,54 @@ public void NotifyDelay(string notification, double delaySeconds) {
 }
 
 public void CheckNotify() {
-    if (!this.HasProgrammableBlocks()) return;
     List<Notification> remove = new List<Notification>();
     foreach (Notification n in this.notifications) {
         var now = DateTime.Now;
         if (n.when > DateTime.Now) continue;
         var message = n.notification;
-        if (message.Equals("DOCK FINISH")) this.Connect();
         remove.Add(n);
-        if (!this.HasProgrammableBlocks()) continue;
-        this.Log("Notifying blocks for: " + n.notification);
+        this.Log("Notifying for: " + n.notification);
         foreach (IMyProgrammableBlock block in this.programableBlocks) {
             block.TryRun(message);
+        }
+        if (message == "NAV STOP") {
+            foreach (IMyShipConnector block in this.connectors) {
+                block.Connect();
+            }
+            this.NotifyTimers();
         }
     }
     foreach (Notification n in remove) {
         this.notifications.Remove(n);
+    }
+}
+
+// Due to some weird reason, timer blocks do not persist on lists. So notify directly.
+public void NotifyTimers() {
+    List<IMyTimerBlock> blocks = new List<IMyTimerBlock>();
+    GridTerminalSystem.GetBlocksOfType<IMyTimerBlock>(blocks, b => b.CubeGrid == Me.CubeGrid);
+    foreach (IMyTimerBlock block in blocks) {
+        var match = Program.tagRegex.Match(block.CustomName);
+        if (!match.Success) continue;
+        switch (match.Groups[2].Value.ToUpper()) {
+            case "TRIGGER":
+                Program.FixNameTag(block, match.Groups[1].Value, " TRIGGER");
+                block.ApplyAction("TriggerNow");
+                break;
+            case "START":
+                Program.FixNameTag(block, match.Groups[1].Value, " START");
+                block.ApplyAction("Start");
+                break;
+            default:
+                Program.FixNameTag(block, match.Groups[1].Value, "");
+                break;
+        }
+    }
+}
+
+public void ConnectorsDisconnect() {
+    foreach (IMyShipConnector block in this.connectors) {
+        block.Disconnect();
     }
 }
 
@@ -707,21 +709,21 @@ public void DockDelete() {
 
 public IMyRemoteControl controlBlock;
 public IMyCameraBlock cameraBlock;
-public List<IMyShipConnector> connectors = new List<IMyShipConnector>();
 public List<IMyTextPanel> navigationPanels = new List<IMyTextPanel>();
 public List<IMyTextPanel> gpsPanels = new List<IMyTextPanel>();
 public List<IMyTextPanel> diagnosticsPanels = new List<IMyTextPanel>();
 public List<IMyTextPanel> loggingPanels = new List<IMyTextPanel>();
 public List<IMyProgrammableBlock> programableBlocks = new List<IMyProgrammableBlock>();
+public List<IMyShipConnector> connectors = new List<IMyShipConnector>();
 
 public bool HasControlBlock() { return this.controlBlock != null; }
 public bool HasCameraBlock() { return this.cameraBlock != null; }
-public bool HasConnectors() { return this.connectors.Count() != 0; }
 public bool HasNavigationPanels() { return this.navigationPanels.Count() != 0; }
 public bool HasGpsPanels() { return this.gpsPanels.Count() != 0; }
 public bool HasDiagnosticsPanels() { return this.diagnosticsPanels.Count() != 0; }
 public bool HasLoggingPanels() { return this.loggingPanels.Count() != 0; }
 public bool HasProgrammableBlocks() { return this.programableBlocks.Count() != 0; }
+public bool HasConnectors() { return this.connectors.Count() != 0; }
 
 public bool firstControlBlockScan = true;
 
@@ -735,9 +737,9 @@ public void ScanControlBlock() {
         Program.TagBlock(this.controlBlock);
         return;
     }
-    foreach(IMyRemoteControl block in blocks) {
+    foreach (IMyRemoteControl block in blocks) {
         var match = Program.tagRegex.Match(block.CustomName);
-        if (!match.Success)  continue;
+        if (!match.Success) continue;
         Program.FixNameTag(block, match.Groups[1].Value, "");
         this.controlBlock = block;
         return;
@@ -768,20 +770,6 @@ public void ScanCameraBlock() {
     }
 }
 
-public void ScanConnectors()
-{
-    this.connectors.Clear();
-    List<IMyShipConnector> blocks = new List<IMyShipConnector>();
-    GridTerminalSystem.GetBlocksOfType<IMyShipConnector>(blocks, b => b.CubeGrid == Me.CubeGrid);
-    foreach (IMyShipConnector block in blocks)
-    {
-        var match = Program.tagRegex.Match(block.CustomName);
-        if (!match.Success) continue;
-        Program.FixNameTag(block, match.Groups[1].Value, "");
-        this.connectors.Add(block);
-    }
-}
-
 public void ScanPanels() {
     this.navigationPanels.Clear();
     this.gpsPanels.Clear();
@@ -789,10 +777,10 @@ public void ScanPanels() {
     this.loggingPanels.Clear();
     List<IMyTextPanel> blocks = new List<IMyTextPanel>();
     GridTerminalSystem.GetBlocksOfType<IMyTextPanel>(blocks);
-    foreach(IMyTextPanel block in blocks) { 
+    foreach (IMyTextPanel block in blocks) {
         var match = Program.tagRegex.Match(block.CustomName);
         if (!match.Success) continue;
-        switch(match.Groups[2].Value.ToUpper()) {
+        switch (match.Groups[2].Value.ToUpper()) {
             case "DIAG":
                 Program.FixNameTag(block, match.Groups[1].Value, " DIAG");
                 Program.ConfigureTextPanel(block, 1.0f);
@@ -833,6 +821,19 @@ public void ScanProgramableBlocks() {
                 Program.FixNameTag(block, match.Groups[1].Value, "");
                 break;
         }
+    }
+}
+
+
+public void ScanConnectors() {
+    this.connectors.Clear();
+    List<IMyShipConnector> blocks = new List<IMyShipConnector>();
+    GridTerminalSystem.GetBlocksOfType<IMyShipConnector>(blocks, b => b.CubeGrid == Me.CubeGrid);
+    foreach (IMyShipConnector block in blocks) {
+        var match = Program.tagRegex.Match(block.CustomName);
+        if (!match.Success) continue;
+        Program.FixNameTag(block, match.Groups[1].Value, "");
+        this.connectors.Add(block);
     }
 }
 
@@ -934,12 +935,12 @@ public static List<string> NATO_CODES = new List<string>(new string[] { "Alfa", 
 public static List<char> SLIDER_ROTATOR = new List<char>(new char[] { '-', '\\', '|', '/' });
 public static List<char> SLIDER_EXCLAMATION_BLINK = new List<char>(new char[] { ' ', '!' });
 public static Dictionary<Vector3I, string> THRUST_DIRECTION = new Dictionary<Vector3I, string>() {
-    { Vector3I.Forward, "Forward" }, { Vector3I.Backward, "Backward" }, { Vector3I.Left, "Left" }, { Vector3I.Right, "Right" }, { Vector3I.Up, "Up" }, { Vector3I.Down, "Down" },
+{ Vector3I.Forward, "Forward" }, { Vector3I.Backward, "Backward" }, { Vector3I.Left, "Left" }, { Vector3I.Right, "Right" }, { Vector3I.Up, "Up" }, { Vector3I.Down, "Down" },
 };
 public static Dictionary<float, ThrusterBlockType> THRUST_TYPE = new Dictionary<float, ThrusterBlockType>() {
-    { 6000000, new ThrusterBlockType("Large", "Large", "Hydrogen") }, {  900000, new ThrusterBlockType("Large", "Small", "Hydrogen") }, {  400000, new ThrusterBlockType("Small", "Large", "Hydrogen") }, {   82000, new ThrusterBlockType("Small", "Small", "Hydrogen") },
-    { 5400000, new ThrusterBlockType("Large", "Large", "Atmospheric") }, {  420000, new ThrusterBlockType("Large", "Small", "Atmospheric") }, {  408000, new ThrusterBlockType("Small", "Large", "Atmospheric") }, {   80000, new ThrusterBlockType("Small", "Small", "Atmospheric") },
-    { 3600000, new ThrusterBlockType("Large", "Large", "Ion") }, {  288000, new ThrusterBlockType("Large", "Small", "Ion") }, {  144000, new ThrusterBlockType("Small", "Large", "Ion") }, {   12000, new ThrusterBlockType("Small", "Small", "Ion") },
+{ 6000000, new ThrusterBlockType("Large", "Large", "Hydrogen") }, {  900000, new ThrusterBlockType("Large", "Small", "Hydrogen") }, {  400000, new ThrusterBlockType("Small", "Large", "Hydrogen") }, {   82000, new ThrusterBlockType("Small", "Small", "Hydrogen") },
+{ 5400000, new ThrusterBlockType("Large", "Large", "Atmospheric") }, {  420000, new ThrusterBlockType("Large", "Small", "Atmospheric") }, {  408000, new ThrusterBlockType("Small", "Large", "Atmospheric") }, {   80000, new ThrusterBlockType("Small", "Small", "Atmospheric") },
+{ 3600000, new ThrusterBlockType("Large", "Large", "Ion") }, {  288000, new ThrusterBlockType("Large", "Small", "Ion") }, {  144000, new ThrusterBlockType("Small", "Large", "Ion") }, {   12000, new ThrusterBlockType("Small", "Small", "Ion") },
 };
 public static List<string> DIAGNOSTICS_TABS = new List<string>(new string[] { "Menu", "Guidelines", "Remote controller", "All thrusters", "Atmospheric", "Hydrogen", "Ion" });
 
@@ -955,7 +956,7 @@ public static string SerializeVector(Vector3D vec) {
 
 public static Vector3D UnserializeVector(string str) {
     var parts = str.Split(':');
-    return new Vector3D( double.Parse(parts[0]), double.Parse(parts[1]), double.Parse(parts[2]));
+    return new Vector3D(double.Parse(parts[0]), double.Parse(parts[1]), double.Parse(parts[2]));
 }
 
 public static void Print(List<IMyTextPanel> panels, string str) {
@@ -977,7 +978,7 @@ public static void FixNameTag(IMyTerminalBlock block, string oldStr, string newS
 public static void TagBlock(IMyTerminalBlock block) {
     var match = tagRegex.Match(block.CustomName);
     if (!match.Success) {
-        block.CustomName += " [" + Program.TAG + "]"; 
+        block.CustomName += " [" + Program.TAG + "]";
         return;
     }
     Program.FixNameTag(block, match.Groups[1].Value, "");
@@ -1012,7 +1013,7 @@ public static bool NearAnyDock(double maxDistance, Vector3D position, Dictionary
 
 public static string GetNearestDock(bool farthest, Vector3D position, Dictionary<string, DockMetadata> docks) {
     string foundDock = "";
-    double foundDistance = farthest ? -Double.MaxValue:Double.MaxValue;
+    double foundDistance = farthest ? -Double.MaxValue : Double.MaxValue;
     foreach (KeyValuePair<string, DockMetadata> dock in docks) {
         var distance = Vector3D.Distance(position, dock.Value.position);
         if (distance < foundDistance && !farthest || distance > foundDistance && farthest) {
