@@ -1,5 +1,5 @@
 // Sam's Autopilot Manager
-public static string VERSION = "1.2.0";
+public static string VERSION = "1.2.1";
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1224507423
 // 
@@ -10,8 +10,7 @@ public static string VERSION = "1.2.0";
 //  Cameron Leger
 //
 // Latest changes:
-//  - Added support for multiple cameras;
-//  - Notifications for remote controll and camera detection;
+//  - (Maybe) Fixed horizontal connector docking;
 
 
 // Change the tag used to identify blocks        
@@ -99,26 +98,28 @@ public void Main(string argument, UpdateType updateSource) {
 
 // -------------------------------------------------------
 // -------------------------------------------------------
-// Internal adjusters
+// Adjusters
 
 public double LINEUP_DISTANCE;
 public double APPROACH_DISTANCE;
 public double FREE_GROUND;
 public double CORRECTION_STEP;
 
-public void AdjustInternals() {
-    var bbRadius = Me.CubeGrid.WorldVolume.Radius;
-    this.APPROACH_DISTANCE = Program.APPROACH_DISTANCE_MULTIPLIER * bbRadius;
-    this.LINEUP_DISTANCE = Program.LINEUP_DISTANCE_MULTIPLIER * bbRadius;
-    this.FREE_GROUND = Program.FREE_GROUND_MULTIPLIER * bbRadius;
-    this.CORRECTION_STEP = Program.CORRECTION_STEP_MULTIPLIER * bbRadius;
+public void AdjustDimentions() {
+    var diameter = 2.0 * Me.CubeGrid.WorldVolume.Radius;
+    this.Log("Grid diameter: " + diameter.ToString("F2") + "m");
+    this.APPROACH_DISTANCE = Program.APPROACH_DISTANCE_MULTIPLIER * diameter;
+    this.LINEUP_DISTANCE = Program.LINEUP_DISTANCE_MULTIPLIER * diameter;
+    this.FREE_GROUND = Program.FREE_GROUND_MULTIPLIER * diameter;
+    this.CORRECTION_STEP = Program.CORRECTION_STEP_MULTIPLIER * diameter;
 }
 
-// Internal adjusters
+// Adjusters
 // -------------------------------------------------------
 // Coordinate generation
 
 public List<Waypoint> GenerateApproach(DockMetadata metadata) {
+    this.AdjustDimentions();
     List<Waypoint> list = new List<Waypoint>();
     var lineup = this.LINEUP_DISTANCE / Math.Sqrt(2.0);
     var approach = this.APPROACH_DISTANCE / Math.Sqrt(2.0);
@@ -871,7 +872,7 @@ public Program() {
         Storage = "";
         this.InitSerializables();
     }
-    this.AdjustInternals();
+    this.AdjustDimentions();
     Runtime.UpdateFrequency = UpdateFrequency.Update10 | UpdateFrequency.Update100;
 }
 
