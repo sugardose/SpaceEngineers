@@ -1,5 +1,5 @@
 // Sam's Autopilot Manager
-public static string VERSION = "1.1.0";
+public static string VERSION = "1.2.0";
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1224507423
 // 
@@ -10,9 +10,9 @@ public static string VERSION = "1.1.0";
 //  Cameron Leger
 //
 // Latest changes:
-//  - Added support for enabling and disabling connectors automatically;
-//  - Added support for notifying Timers with START/TRIGGER
-        
+//  - Added support for multiple cameras;
+//  - Notifications for remote controll and camera detection;
+
 
 // Change the tag used to identify blocks        
 public static string TAG = "SAM";
@@ -27,7 +27,7 @@ public static double LINEUP_DISTANCE_MULTIPLIER = 5.0;
 public static double APPROACH_DISTANCE_MULTIPLIER = 2.0;
 public static double FREE_GROUND_MULTIPLIER = 8.0;
 public static double CORRECTION_STEP_MULTIPLIER = 10.0;
-public static double REMOTE_MAX_DISTANCE = 2.0;
+public static double REMOTE_MAX_DISTANCE = 5.0;
 public static double THRUST_MIN_ACCELERATION = 2.0;
 
 // -------------------------------------------------------
@@ -80,7 +80,7 @@ public void Update10() {
 
 public void Update100() {
     try { this.ScanControlBlock(); } catch (Exception e) { this.Log("Update100 ScanControlBlock exception: " + e.Message); }
-    try { this.ScanCameraBlock(); } catch (Exception e) { this.Log("Update100 ScanCameraBlock exception: " + e.Message); }
+    try { this.ScanCameraBlocks(); } catch (Exception e) { this.Log("Update100 ScanCameraBlock exception: " + e.Message); }
     try { this.ScanPanels(); } catch (Exception e) { this.Log("Update100 ScanPanels exception: " + e.Message); }
     try { this.ScanProgramableBlocks(); } catch (Exception e) { this.Log("Update100 ScanProgramableBlocks exception: " + e.Message); }
     try { this.ScanConnectors(); } catch (Exception e) { this.Log("Update100 ScanConnectors exception: " + e.Message); }
@@ -234,7 +234,6 @@ public DockMetadata CreateDockMetadata() {
 // Navigation Mechanics
 
 public Vector3D currentPosition;
-public Vector3D cameraPosition;
 public Vector3D planetCenter;
 public double currentWaypointDistance;
 public double nextWaypointDistance;
@@ -246,21 +245,31 @@ public bool InPlanet() {
 
 public void UpdateTransients() {
     this.currentPosition = this.controlBlock.GetPosition();
-    this.cameraPosition = this.cameraBlock.GetPosition();
     if (this.waypoints.Count() == 0) return;
     this.currentWaypointDistance = Vector3D.Distance(this.waypoints.First().position, this.currentPosition);
     this.nextWaypointDistance = Vector3D.Distance(this.currentPosition, this.waypoints[Math.Min(this.waypoints.Count - 1, 1)].position);
 }
 
-public Vector3D? CheckObstructedPath() {
-    if (!HasCameraBlock()) return null;
-    var cast = Program.LerpToDistance(this.FREE_GROUND, this.waypoints.First().position, this.planetCenter);
-    if (!cameraBlock.CanScan(Vector3D.Distance(this.cameraPosition, cast))) return null;
-    var info = cameraBlock.Raycast(cast);
+
+public Vector3D? CheckCameraObstructedPath(IMyCameraBlock camera, Vector3D cast) {
+    if (!camera.CanScan(Vector3D.Distance(camera.GetPosition(), cast))) return null;
+    var info = camera.Raycast(cast);
+    if (info.IsEmpty()) return null;
     switch (info.Type) {
         case MyDetectedEntityType.LargeGrid:
         case MyDetectedEntityType.Planet:
             return info.HitPosition;
+    }
+    return null;
+}
+
+public Vector3D? CheckObstructedPath() {
+    if (!HasCameraBlock()) return null;
+    var cast = Program.LerpToDistance(this.FREE_GROUND, this.waypoints.First().position, this.planetCenter);
+
+    foreach(IMyCameraBlock camera in this.cameraBlocks) {
+        var hit = CheckCameraObstructedPath(camera, cast);
+        if (hit != null) return hit;
     }
     return null;
 }
@@ -708,7 +717,7 @@ public void DockDelete() {
 // Blocks
 
 public IMyRemoteControl controlBlock;
-public IMyCameraBlock cameraBlock;
+public List<IMyCameraBlock> cameraBlocks = new List<IMyCameraBlock>();
 public List<IMyTextPanel> navigationPanels = new List<IMyTextPanel>();
 public List<IMyTextPanel> gpsPanels = new List<IMyTextPanel>();
 public List<IMyTextPanel> diagnosticsPanels = new List<IMyTextPanel>();
@@ -717,7 +726,7 @@ public List<IMyProgrammableBlock> programableBlocks = new List<IMyProgrammableBl
 public List<IMyShipConnector> connectors = new List<IMyShipConnector>();
 
 public bool HasControlBlock() { return this.controlBlock != null; }
-public bool HasCameraBlock() { return this.cameraBlock != null; }
+public bool HasCameraBlock() { return this.cameraBlocks.Count() != 0; }
 public bool HasNavigationPanels() { return this.navigationPanels.Count() != 0; }
 public bool HasGpsPanels() { return this.gpsPanels.Count() != 0; }
 public bool HasDiagnosticsPanels() { return this.diagnosticsPanels.Count() != 0; }
@@ -747,26 +756,37 @@ public void ScanControlBlock() {
     if (firstControlBlockScan) {
         this.Log("Unable to find a Remote Controller");
         firstControlBlockScan = false;
+        return;
+    }
+    if (!firstCameraScan && this.HasCameraBlock()) {
+        this.Log("Found Remote Controller");
+        firstControlBlockScan = true;
+        return;
     }
 }
 
 public bool firstCameraScan = true;
 
-public void ScanCameraBlock() {
-    this.cameraBlock = null;
+public void ScanCameraBlocks() {
+    this.cameraBlocks.Clear();
     List<IMyCameraBlock> blocks = new List<IMyCameraBlock>();
     GridTerminalSystem.GetBlocksOfType<IMyCameraBlock>(blocks, b => b.CubeGrid == Me.CubeGrid);
     foreach (IMyCameraBlock block in blocks) {
         var match = Program.tagRegex.Match(block.CustomName);
         if (!match.Success) continue;
         Program.FixNameTag(block, match.Groups[1].Value, "");
-        this.cameraBlock = block;
-        this.cameraBlock.EnableRaycast = true;
-        return;
+        block.EnableRaycast = true;
+        this.cameraBlocks.Add(block);
     }
-    if (firstCameraScan) {
+    if (firstCameraScan && !this.HasCameraBlock()) {
         this.Log("Unable to find a Camera");
         firstCameraScan = false;
+        return;
+    }
+    if (!firstCameraScan && this.HasCameraBlock()) {
+        this.Log("Found Camera(s)");
+        firstCameraScan = true;
+        return;
     }
 }
 
@@ -934,14 +954,8 @@ public static int NATO_MAX_CODE_SIZE = 8;
 public static List<string> NATO_CODES = new List<string>(new string[] { "Alfa", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel", "India", "Juliett", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa", "Quebec", "Romeo", "Sierra", "Tango", "Uniform", "Victor", "Whiskey", "Xray", "Yankee", "Zulu" });
 public static List<char> SLIDER_ROTATOR = new List<char>(new char[] { '-', '\\', '|', '/' });
 public static List<char> SLIDER_EXCLAMATION_BLINK = new List<char>(new char[] { ' ', '!' });
-public static Dictionary<Vector3I, string> THRUST_DIRECTION = new Dictionary<Vector3I, string>() {
-{ Vector3I.Forward, "Forward" }, { Vector3I.Backward, "Backward" }, { Vector3I.Left, "Left" }, { Vector3I.Right, "Right" }, { Vector3I.Up, "Up" }, { Vector3I.Down, "Down" },
-};
-public static Dictionary<float, ThrusterBlockType> THRUST_TYPE = new Dictionary<float, ThrusterBlockType>() {
-{ 6000000, new ThrusterBlockType("Large", "Large", "Hydrogen") }, {  900000, new ThrusterBlockType("Large", "Small", "Hydrogen") }, {  400000, new ThrusterBlockType("Small", "Large", "Hydrogen") }, {   82000, new ThrusterBlockType("Small", "Small", "Hydrogen") },
-{ 5400000, new ThrusterBlockType("Large", "Large", "Atmospheric") }, {  420000, new ThrusterBlockType("Large", "Small", "Atmospheric") }, {  408000, new ThrusterBlockType("Small", "Large", "Atmospheric") }, {   80000, new ThrusterBlockType("Small", "Small", "Atmospheric") },
-{ 3600000, new ThrusterBlockType("Large", "Large", "Ion") }, {  288000, new ThrusterBlockType("Large", "Small", "Ion") }, {  144000, new ThrusterBlockType("Small", "Large", "Ion") }, {   12000, new ThrusterBlockType("Small", "Small", "Ion") },
-};
+public static Dictionary<Vector3I, string> THRUST_DIRECTION = new Dictionary<Vector3I, string>() {{ Vector3I.Forward, "Forward" }, { Vector3I.Backward, "Backward" }, { Vector3I.Left, "Left" }, { Vector3I.Right, "Right" }, { Vector3I.Up, "Up" }, { Vector3I.Down, "Down" },};
+public static Dictionary<float, ThrusterBlockType> THRUST_TYPE = new Dictionary<float, ThrusterBlockType>() {{ 6000000, new ThrusterBlockType("Large", "Large", "Hydrogen") }, {  900000, new ThrusterBlockType("Large", "Small", "Hydrogen") }, {  400000, new ThrusterBlockType("Small", "Large", "Hydrogen") }, {   82000, new ThrusterBlockType("Small", "Small", "Hydrogen") },{ 5400000, new ThrusterBlockType("Large", "Large", "Atmospheric") }, {  420000, new ThrusterBlockType("Large", "Small", "Atmospheric") }, {  408000, new ThrusterBlockType("Small", "Large", "Atmospheric") }, {   80000, new ThrusterBlockType("Small", "Small", "Atmospheric") },{ 3600000, new ThrusterBlockType("Large", "Large", "Ion") }, {  288000, new ThrusterBlockType("Large", "Small", "Ion") }, {  144000, new ThrusterBlockType("Small", "Large", "Ion") }, {   12000, new ThrusterBlockType("Small", "Small", "Ion") },};
 public static List<string> DIAGNOSTICS_TABS = new List<string>(new string[] { "Menu", "Guidelines", "Remote controller", "All thrusters", "Atmospheric", "Hydrogen", "Ion" });
 
 static System.Text.RegularExpressions.Regex tagRegex = new System.Text.RegularExpressions.Regex("\\[" + Program.TAG + "(\\s+([0-9a-zA-Z]*)\\s*)*\\]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
