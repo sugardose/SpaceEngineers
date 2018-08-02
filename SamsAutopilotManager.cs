@@ -8,9 +8,10 @@ public static string VERSION = "1.2.1";
 // Owner: Sam
 // Contributors:
 //  Cameron Leger
+//  Michael Lane
 //
 // Latest changes:
-//  - (Maybe) Fixed horizontal connector docking;
+//  - Modified where the call is made for NotifyTimers to ensure it is called everytime you dock;
 
 
 // Change the tag used to identify blocks        
@@ -163,6 +164,7 @@ public void ConfigureRemote() {
 public void StopRemoteAutopilot() {
     this.controlBlock.SetAutoPilotEnabled(false);
     this.controlBlock.ClearWaypoints();
+    this.NotifyTimers();
 }
 
 // Remote configuration
@@ -617,7 +619,6 @@ public void CheckNotify() {
             foreach (IMyShipConnector block in this.connectors) {
                 block.Connect();
             }
-            this.NotifyTimers();
         }
     }
     foreach (Notification n in remove) {
@@ -635,11 +636,11 @@ public void NotifyTimers() {
         switch (match.Groups[2].Value.ToUpper()) {
             case "TRIGGER":
                 Program.FixNameTag(block, match.Groups[1].Value, " TRIGGER");
-                block.ApplyAction("TriggerNow");
+                block.GatActionWithName("TriggerNow").Apply(block);
                 break;
             case "START":
                 Program.FixNameTag(block, match.Groups[1].Value, " START");
-                block.ApplyAction("Start");
+                block.GetActionWithName("Start").Apply(block);
                 break;
             default:
                 Program.FixNameTag(block, match.Groups[1].Value, "");
