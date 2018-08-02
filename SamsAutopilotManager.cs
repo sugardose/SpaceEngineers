@@ -1,5 +1,5 @@
 // Sam's Autopilot Manager
-public static string VERSION = "1.2.1";
+public static string VERSION = "1.2.3";
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1224507423
 // 
@@ -23,10 +23,10 @@ public static string TAG = "SAM";
 public static double DISTANCE_THRESHOLD_DOCKING = 1.0;
 public static double DISTANCE_THRESHOLD_HOPPING = 1000;
 
-public static double LINEUP_DISTANCE_MULTIPLIER = 5.0;
-public static double APPROACH_DISTANCE_MULTIPLIER = 2.0;
-public static double FREE_GROUND_MULTIPLIER = 8.0;
-public static double CORRECTION_STEP_MULTIPLIER = 10.0;
+public static double LINEUP_DISTANCE_MULTIPLIER = 2.0;
+public static double APPROACH_DISTANCE_MULTIPLIER = 1.0;
+public static double FREE_GROUND_MULTIPLIER = 4.0;
+public static double CORRECTION_STEP_MULTIPLIER = 5.0;
 public static double REMOTE_MAX_DISTANCE = 5.0;
 public static double THRUST_MIN_ACCELERATION = 2.0;
 
@@ -123,12 +123,14 @@ public List<Waypoint> GenerateApproach(DockMetadata metadata) {
     this.AdjustDimentions();
     List<Waypoint> list = new List<Waypoint>();
     var lineup = this.LINEUP_DISTANCE / Math.Sqrt(2.0);
-    var approach = this.APPROACH_DISTANCE / Math.Sqrt(2.0);
+    var approach = this.APPROACH_DISTANCE;
 
     if (Program.NearAnyDock(2 * DISTANCE_THRESHOLD_DOCKING, this.currentPosition, this.docks)) {
         var currentUp = this.controlBlock.WorldMatrix.Up;
         var currentBackward = this.controlBlock.WorldMatrix.Backward;
-        var makeSpaceWaypoint = this.currentPosition + (lineup * currentUp) + (lineup * currentBackward);
+        var makeSpaceWaypoint = this.currentPosition + (approach * currentBackward);
+        list.Add(new Waypoint(false, true, true, 100.0f, makeSpaceWaypoint));
+        makeSpaceWaypoint = this.currentPosition + (lineup * currentUp) + (lineup * currentBackward);
         list.Add(new Waypoint(false, true, true, 100.0f, makeSpaceWaypoint));
         this.Log("Near a Dock - withdrawing backwards");
     }
@@ -137,7 +139,7 @@ public List<Waypoint> GenerateApproach(DockMetadata metadata) {
     list.Add(new Waypoint(true, false, false, 100.0f, Program.LerpToDistance(2 * Program.DISTANCE_THRESHOLD_HOPPING, this.currentPosition, Program.QuarterSlerp(this.currentPosition, directionWaypoint, this.planetCenter))));
 
     list.Add(new Waypoint(false, false, true, 100.0f, directionWaypoint));
-    list.Add(new Waypoint(false, false, true, 100.0f, metadata.position + (-approach * metadata.front) + (approach * metadata.up)));
+    list.Add(new Waypoint(false, false, true, 100.0f, metadata.position + (-approach * metadata.front)));
     list.Add(new Waypoint(false, false, true, 100.0f, metadata.position));
     return list;
 }
@@ -636,7 +638,7 @@ public void NotifyTimers() {
         switch (match.Groups[2].Value.ToUpper()) {
             case "TRIGGER":
                 Program.FixNameTag(block, match.Groups[1].Value, " TRIGGER");
-                block.GatActionWithName("TriggerNow").Apply(block);
+                block.GetActionWithName("TriggerNow").Apply(block);
                 break;
             case "START":
                 Program.FixNameTag(block, match.Groups[1].Value, " START");
