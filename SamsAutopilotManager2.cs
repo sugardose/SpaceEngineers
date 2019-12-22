@@ -7,6 +7,7 @@ public static string VERSION = "2.3.0";
 // Contributors: SCBionicle
 //
 // Latest changes:
+// - support for cockpits with multiple panels;
 // - adopted fixes and changes from SCBionicle;
 // - fixed unsupported code;
 // - Added docking paths;
@@ -71,8 +72,6 @@ private static float DISTANCE_TO_GROUND_IGNORE_PLANET = 1.2f * HORIZONT_CHECK_DI
 private static float MAX_TRUST_UNDERESTIMATE_PERCENTAGE = 0.90f;
 private static int DOCK_ATTEMPTS = 5;
 private static int LOG_MAX_LINES = 30;
-private static int SCAN_PERIOD = 10;
-
 
 public static class Raytracer {
 	public enum Result {
@@ -838,15 +837,9 @@ public void Update10(ref string unused) {
 	if(Me.CustomName.Contains("DEBUG"))
 		this.DebugPrintLogging();
 }
-public int scanStep = 0;
 public void Update100(ref string unused) {
 	try {
-		if(scanStep >= SCAN_PERIOD || Pilot.running) {
-			this.ScanGrid();
-			scanStep = 0;
-		} else {
-			++scanStep;
-		}
+		this.ScanGrid();
 	} catch(Exception e) {
 		Logger.Err("Update100 ScanGrid exception: " + e.Message);
 	}
@@ -1182,7 +1175,7 @@ public static class CustomData {
 	}
 }
 public static class CustomName {
-	private static char[] attributeSeparator = new char[] { '=' };
+	private static char[] attributeSeparator = new char[] { ':', '=' };
 	private static System.Text.RegularExpressions.Regex tagSimpleRegex = new System.Text.RegularExpressions.Regex("\\[(" + TAG + "[\\s\\S]*)\\]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 	private static string tagRegStr = TAG + "\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*(\\S*)\\s*";
 	private static System.Text.RegularExpressions.Regex tagRegex = new System.Text.RegularExpressions.Regex(tagRegStr, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -1245,11 +1238,13 @@ public static class Profiles {
 	private static string[] empty = new string[] { };
 	private static string[] meTags = new string[] { "DEBUG", "ADVERTISE" };
 	private static string[] textPanelTags = new string[] { "OVR" };
+	private static string[] cockpitTags = new string[] { "OVR" };
 	private static string[] textPanelExclusiveTags = new string[] { "LOG", "NAV", "CONF", "DATA" };
 	private static string[] pbAttributes = new string[] { "Name", "Speed", "Wait" };
 	private static string[] namedAttributes = new string[] { "Name" };
+	public static string[] cockpitAttributes = new string[] { "PANEL0", "PANEL1", "PANEL2", "PANEL3", "PANEL4", "PANEL5", "PANEL6", "PANEL7", "PANEL8", "PANEL9" };
 	private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED" };
-	public static Dictionary<Type, BlockProfile> perType = new Dictionary<Type, BlockProfile> { { typeof(IMyRemoteControl), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyCameraBlock), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyRadioAntenna), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyLaserAntenna), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyProgrammableBlock), new BlockProfile(ref empty, ref empty, ref pbAttributes) }, { typeof(IMyShipConnector), new BlockProfile(ref empty, ref empty, ref namedAttributes) }, { typeof(IMyTextPanel), new BlockProfile(ref textPanelTags, ref textPanelExclusiveTags, ref namedAttributes) }, { typeof(IMyTimerBlock), new BlockProfile(ref timerTags, ref empty, ref empty) }, };
+	public static Dictionary<Type, BlockProfile> perType = new Dictionary<Type, BlockProfile> { { typeof(IMyRemoteControl), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyCameraBlock), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyRadioAntenna), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyLaserAntenna), new BlockProfile(ref empty, ref empty, ref empty) }, { typeof(IMyProgrammableBlock), new BlockProfile(ref empty, ref empty, ref pbAttributes) }, { typeof(IMyShipConnector), new BlockProfile(ref empty, ref empty, ref namedAttributes) }, { typeof(IMyTextPanel), new BlockProfile(ref textPanelTags, ref textPanelExclusiveTags, ref namedAttributes) }, { typeof(IMyCockpit), new BlockProfile(ref cockpitTags, ref empty, ref cockpitAttributes) }, { typeof(IMyTimerBlock), new BlockProfile(ref timerTags, ref empty, ref empty) }, };
 	public static BlockProfile me = new BlockProfile(ref meTags, ref empty, ref pbAttributes);
 }
 public static class Block {
@@ -1455,7 +1450,7 @@ public void ScanGrid() {
 			continue;
 		if(!block.IsSameConstructAs(Me))
 			continue;
-		
+
 		if(block.EntityId == Me.EntityId)
 			continue;
 		if(GridBlocks.AddBlock(block))
@@ -1634,7 +1629,8 @@ public static class Pannels {
 		}
 	}
 	public static void Print() {
-		if(GridBlocks.textPanels.Count() == 0 && GridBlocks.cockpitBlocks.Count() == 0) return;
+		if(GridBlocks.textPanels.Count() == 0 && GridBlocks.cockpitBlocks.Count() == 0)
+			return;
 		ResetBuffers();
 		foreach(IMyTextPanel panel in GridBlocks.textPanels) {
 			if(Block.HasProperty(panel.EntityId, "Name")) {
@@ -1658,15 +1654,33 @@ public static class Pannels {
 			panel.WriteText(printBuffer);
 		}
 		FillPrintBuffer(selected.Peek());
-		foreach(IMyCockpit pit in GridBlocks.cockpitBlocks) {
-			string slotNumberStr = "";
-			if(Block.GetProperty(pit.EntityId, "Slot", ref slotNumberStr)) {
-				int slot = 0;
-				int.TryParse(slotNumberStr, out slot);
-				if(slot < pit.SurfaceCount) {
-					IMyTextSurface surface = pit.GetSurface(slot);
-					surface.ContentType = VRage.Game.GUI.TextPanel.ContentType.TEXT_AND_IMAGE;
-					surface.WriteText(printBuffer);
+		foreach(IMyCockpit cockpit in GridBlocks.cockpitBlocks) {
+			string screen = "";
+			for(int panel = 0; panel < cockpit.SurfaceCount && panel < Profiles.cockpitAttributes.Length; ++panel) {
+				if(!Block.GetProperty(cockpit.EntityId, Profiles.cockpitAttributes[panel], ref screen)) {
+					continue;
+				}
+				IMyTextSurface surface = cockpit.GetSurface(panel);
+				surface.ContentType = VRage.Game.GUI.TextPanel.ContentType.TEXT_AND_IMAGE;
+				switch(screen.ToUpper()) {
+					case "LOG":
+						FillPrintBuffer("LOG");
+						break;
+					case "NAV":
+						FillPrintBuffer("NAV");
+						break;
+					case "CONF":
+						FillPrintBuffer("CONF");
+						break;
+					default:
+						FillPrintBuffer(selected.Peek());
+						break;
+				}
+				surface.WriteText(printBuffer);
+				if(!Block.HasProperty(cockpit.EntityId, "OVR")) {
+					surface.FontSize = 1.180f;
+					surface.Font = "Monospace";
+					surface.TextPadding = 0.0f;
 				}
 			}
 		}
@@ -1728,7 +1742,7 @@ public void DebugPrintLogging() {
 	if(blocks.Count() == 0)
 		return;
 	Animation.DebugRun();
-	var str = Animation.DebugRotator() + Logger.PrintBuffer(false);
+	var str = Logger.PrintBuffer(false);
 	foreach(IMyTextPanel panel in blocks) {
 		if(!panel.CustomName.Contains("LOG"))
 			continue;
@@ -2096,4 +2110,6 @@ public class Dock:IComparable<Dock> {
 		return (DateTime.Now.Ticks - lastSeen) < STALE_TIME;
 	}
 }
+
+
 
