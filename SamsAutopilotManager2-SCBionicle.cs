@@ -1,4 +1,4 @@
-/* Modified by: SCBionicle
+/*
  * * vMod 9.4.2:
  * * - Now outputs to cockpits even if there's no LCD panels assigned.
  * * - No longer touches custom data that doesn't have SAM in it.
@@ -30,6 +30,10 @@
  * * - Fixed additional alignment issues
  * * vMod 9.5.6:
  * * - Fix for entering and exiting planets with your nose up and down (you no longer will flip upside down unexpectedly)
+ * * vMod 9.6.0:
+ * * - Added "APPROACHING" tag for timers (great for retracting wings when you're about to dock)
+ * * vMod 9.6.1:
+ * * - Fix for null connector exception when trying to dock when no connector was tagged
  * 
  * Commands (Arguments in Programmable Block)
  * -----------
@@ -61,7 +65,7 @@
 
 //Modified by SCBionicle
 // Sam's Autopilot Manager
-public static string VERSION = "2 vMod 9.5.6";
+public static string VERSION = "2 vMod 9.6.1";
 
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1653875433
@@ -1043,12 +1047,13 @@ public static class Pilot
     private static void CalculateApproach()
     {
         connector = ConnectorControl.GetConnector(dock[0]);
-        bool reversedConnector = Block.HasProperty(connector.EntityId, CONNECTOR_REVERSE_TAG);
+
         if (connector == null)
         {
             Logger.Warn(MSG_NO_CONNECTORS_AVAILABLE);
             return;
         }
+        bool reversedConnector = Block.HasProperty(connector.EntityId, CONNECTOR_REVERSE_TAG);
         Situation.RefreshParameters();
         connectorToCenter = Situation.position - connector.GetPosition();
         if (Math.Abs(Vector3D.Dot(dock[0].stance.forward, Situation.gravityUpVector)) < 0.5f)
@@ -2396,7 +2401,7 @@ public static class Profiles
     DOCK_SPEED_TAG, UNDOCK_DISTANCE_TAG, APPROACH_SPEED_TAG, APPROACH_SAFE_DISTANCE_TAG, ARRIVAL_SPEED_TAG, ARRIVAL_DISTANCE_TAG, ESCAPE_NOSE_UP_ELEVATION_TAG
     };
     private static string[] namedAttributes = new string[] { "Name" };
-    private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED", "STARTED", "UNDOCKED" };
+    private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED", "STARTED", "UNDOCKED", "APPROACHING" };
     public static Dictionary<Type, BlockProfile> perType = new Dictionary<Type, BlockProfile> { { typeof(IMyRemoteControl),
             new BlockProfile(ref empty, ref empty, ref empty) },
         { typeof(IMyCameraBlock),
@@ -2971,7 +2976,7 @@ public void ScanGrid()
 }
 public static class Signal
 {
-    public enum SignalType { DOCK, NAVIGATION, START, UNDOCK };
+    public enum SignalType { DOCK, NAVIGATION, START, UNDOCK, APPROACH };
     public static HashSet<SignalType> list = new HashSet<SignalType>();
     public static long lastSignal = long.MaxValue;
     public static Program thisProgram;
@@ -3045,21 +3050,21 @@ public void SendSignals()
             {
                 if (Block.HasProperty(entityID, "DOCKED") && Signal.list.Contains(Signal.SignalType.DOCK))
                 {
-                    Logger.Info("Timer triggered due to Docking accomplished");
+                    Logger.Info("Timer started due to Docking accomplished");
                     timer.StartCountdown();
                     sentSignal = true;
                     //timer.ApplyAction("Start");
                 }
                 if (Block.HasProperty(entityID, "NAVIGATED") && Signal.list.Contains(Signal.SignalType.NAVIGATION))
                 {
-                    Logger.Info("Timer triggered due to Navigation finished");
+                    Logger.Info("Timer started due to Navigation finished");
                     //timer.ApplyAction("Start");
                     timer.StartCountdown();
                     sentSignal = true;
                 }
                 if (Block.HasProperty(entityID, "STARTED") && Signal.list.Contains(Signal.SignalType.START))
                 {
-                    Logger.Info("Timer triggered due to Navigation start");
+                    Logger.Info("Timer started due to Navigation start");
                     timer.StartCountdown();
                     sentSignal = true;
                 }
@@ -3067,6 +3072,12 @@ public void SendSignals()
                 {
                     Logger.Info("Timer triggered due to undocking started");
                     timer.Trigger();
+                    sentSignal = true;
+                }
+                if (Block.HasProperty(entityID, "APPROACHING") && Signal.list.Contains(Signal.SignalType.APPROACH))
+                {
+                    Logger.Info("Timer started due to approaching destination");
+                    timer.StartCountdown();
                     sentSignal = true;
                 }
             }
