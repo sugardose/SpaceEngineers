@@ -34,6 +34,11 @@
  * * - Added "APPROACHING" tag for timers (great for retracting wings when you're about to dock)
  * * vMod 9.6.1:
  * * - Fix for null connector exception when trying to dock when no connector was tagged
+ * * vMod 10.0.0:
+ * * - Added new feature, "Auto cruise". You can now go to a specified cruising altitude on planets to get from point A to B faster.
+ * *		No more crashing into terrain when you destination is on the opposite side of the planet.
+ * * - Updated GPS to use new format that Keen has changed. GPS will now work without workarounds.
+ * * - Fixed misaligned dock jank that happened in space.
  * 
  * Commands (Arguments in Programmable Block)
  * -----------
@@ -65,7 +70,7 @@
 
 //Modified by SCBionicle
 // Sam's Autopilot Manager
-public static string VERSION = "2 vMod 9.6.1";
+public static string VERSION = "2 vMod 10.0.0";
 
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1653875433
@@ -165,6 +170,8 @@ private static string MSG_TAXIING = "taxiing...";
 
 private static string MSG_NAVIGATION_TO = "Navigating to ";
 
+private static string MSG_CRUISING_AT = "cruising at {0:N} m, climbing at {1:N0}°...";
+
 private static string MSG_NAVIGATION_TO_WAYPOINT = "Navigating to coordinates";
 
 private static string MSG_NAVIGATION_SUCCESSFUL = "Navigation successful!";
@@ -235,6 +242,7 @@ private const string ALLOW_DIRECT_ALIGNMENT_TAG = "ALLOWDIRECTALIGNMENT"; //In s
 
 private const string CONNECTOR_REVERSE_TAG = "REVERSE"; //Some modded connectors are placed backwards to work for some reason. It confuses this script.
                                                         //^^ If the connector goes on backwards, add this tag to the connector to work around that. Use the BuildInfo mod to make sure that this is the case.
+private const string AUTO_CRUISE_ATTRIBUTE = "Auto_cruise";
 
 
 
@@ -371,6 +379,8 @@ public static class Situation
     private static double forwardChange, upChange, leftChange;
 
     private static Vector3D maxT;
+
+    public static double autoCruiseAltitude = double.PositiveInfinity;
 
     public static double GetMaxThrust(Vector3D dir)
     {
@@ -538,7 +548,7 @@ public static class Guidance
     private static float desiredSpeed = MAX_SPEED;
     private static Waypoint waypoint = null;
 
-    private static double planetDirDifference = 0;
+    //private static double planetDirDifference = 0;
 
     private const double planetUpDiffThreshold = 0.5;
 
@@ -637,7 +647,7 @@ public static class Guidance
         else if (!Situation.turnNoseUp) //was just an else (change this back to else if script breaks)
         {
             upVector = (desiredUp == Vector3D.Zero) ? Vector3D.Cross(aimVector, Situation.leftVector) : desiredUp;
-            planetDirDifference = 0; //reset the diff so that it won't tilt the ship at the wrong time (when not in gravity well)
+            //planetDirDifference = 0; //reset the diff so that it won't tilt the ship at the wrong time (when not in gravity well)
         }
         else
         {
@@ -645,7 +655,7 @@ public static class Guidance
 
             Vector3D desiredUpVector = Situation.upVector;
 
-            if(waypoint.type == Waypoint.wpType.CONVERGING)
+            if(waypoint.type == Waypoint.wpType.CONVERGING || waypoint.type == Waypoint.wpType.CRUISING)
             {
                 Vector3D newUpVector = Vector3D.ProjectOnPlane(ref planetUpVector, ref targetDirection);
                 newUpVector = Vector3D.Normalize(newUpVector);
@@ -717,7 +727,7 @@ public static class Guidance
             return;
 
         }
-
+        //Logger.Log($"Path length: {pathLen:N}");
         //*********Remove this "if" if slow down doesn't work**************
         //if (desiredSpeed < Situation.linearVelocity.Length() - BRAKE_THRUST_TRIGGER_DIFFERENCE)
         //{
@@ -824,6 +834,7 @@ public static class Navigation
                 break;
 
             case Waypoint.wpType.NAVIGATING: break;
+            case Waypoint.wpType.CRUISING: break;
 
             default: return;
 
@@ -864,6 +875,113 @@ public static class Navigation
         }
     }
 
+    private static double altitudeGravityStart = 0;
+    public static float ClimbAngle = 0;
+    private static void ProcessAutoCruise()
+    {
+        Vector3D gravityUp;
+        double seaLevelAltitude = double.MinValue;
+        bool inGravity = RemoteControl.block?.TryGetPlanetElevation(MyPlanetElevation.Sealevel, out seaLevelAltitude) ?? false; //ways to bypass null pointers
+        gravityUp = -RemoteControl.block?.GetNaturalGravity() ?? Vector3D.Zero;
+        Vector3D gravityUpNorm = Vector3D.Normalize(gravityUp); //normalized vector of upwards gravity
+
+        altitudeGravityStart = inGravity ? Math.Max(altitudeGravityStart, seaLevelAltitude) : 0;
+        const float maxDescentAngle = (float) -Math.PI / 2;
+        const float maxAscentAngle = (float) Math.PI / 4;
+
+        if(!double.IsNaN(Situation.autoCruiseAltitude) && inGravity) //Is autocruise enabled and are you in a gravity well?
+        {
+            Vector3D ?desiredDock = Pilot.dock.Count>0 ? Pilot.dock[0]?.stance.position : null;
+            if (desiredDock == null)
+            {
+                StopAutoCruise();
+                return;
+            }
+            Vector3D desiredDestination = desiredDock ?? Vector3D.NegativeInfinity; //You can trust this to be valid coordinate (needed a default value to satisfy the compiler)
+            Vector3D dockDirNotNormed = desiredDestination - Situation.position;
+            bool closeEnough = Vector3D.Distance(desiredDestination, Situation.position) < Situation.autoCruiseAltitude * 2; //Close enough to start descending?
+            Vector3D dockDir = Vector3D.Normalize(dockDirNotNormed); //Direction of the destination compared to the vessel in question
+            bool toAbove = Vector3D.Dot(dockDir, gravityUpNorm) > 0.1; //Is the destination above the ship
+            bool directlyBelow;
+            if (Vector3D.Dot(dockDir, gravityUpNorm) < -0.95f && Vector3D.Distance(desiredDestination, Situation.position) < Vector3D.Distance(Situation.planetCenter, Situation.position))
+                directlyBelow = true;
+            else
+                directlyBelow = false;
+
+            if(!closeEnough && !toAbove && !directlyBelow && (waypoints[0].type & (Waypoint.wpType.CONVERGING | Waypoint.wpType.CRUISING | Waypoint.wpType.NAVIGATING)) != 0){ //all conditions must be true to cruise
+                Vector3D DesiredCruiseToPoint; //This is where SAM will try to got when cruising. Be sure to have this var set by the time your code exits
+                Vector3D dockDirGravityProj = Vector3D.ProjectOnPlane(ref dockDir, ref gravityUpNorm);
+                Vector3D dockDirRightPerpendicular = Vector3D.Cross(Vector3D.Normalize(dockDirGravityProj), gravityUpNorm);
+                //Climb angle calculations here
+                //float climbAngle;
+                if (seaLevelAltitude+100 <= Situation.autoCruiseAltitude)
+                {                       //(Max angle rads) / ...
+                    ClimbAngle = (float)(((Math.PI / 4) / (Math.PI/2)) * Math.Acos(2 * (seaLevelAltitude / Situation.autoCruiseAltitude) - 1));
+                }
+                else if(seaLevelAltitude-100 >= Situation.autoCruiseAltitude)
+                {                        //(Max angle rads) / ...
+                    ClimbAngle = (float)(-((Math.PI / 2) / (Math.PI/2)) * Math.Acos(2 *
+                        ((altitudeGravityStart - seaLevelAltitude) / (altitudeGravityStart - Situation.autoCruiseAltitude))-1));
+                }
+                else
+                {
+                    ClimbAngle = 0;
+                }
+                //Logger.Info($"Climb angle: {MathHelper.ToDegrees(ClimbAngle):N2} -> {MathHelper.ToDegrees(MathHelperD.Clamp(ClimbAngle, maxDescentAngle, maxAscentAngle)):N2}");
+                ClimbAngle = float.IsNaN(ClimbAngle) ? 0 : ClimbAngle;
+                ClimbAngle = (float)MathHelperD.Clamp(ClimbAngle, maxDescentAngle, maxAscentAngle);
+                Vector3D intendedDirection = Vector3D.Transform(dockDirGravityProj, Quaternion.CreateFromAxisAngle(dockDirRightPerpendicular, ClimbAngle)); //not normed or at desired magnitude
+                Vector3D intendedDirectionNorm = Vector3D.Normalize(intendedDirection);
+                Vector3D intendedDistanceAsVector = dockDirNotNormed;
+                Vector3D finalDirection = Vector3D.ProjectOnVector(ref intendedDistanceAsVector, ref intendedDirectionNorm);
+                DesiredCruiseToPoint = Situation.position + finalDirection;
+
+
+                SetCruisePos(DesiredCruiseToPoint); //Inserts cruising waypoint and edits existing ones
+                return;
+            }
+        }
+        StopAutoCruise();
+    }
+
+    private static void StopAutoCruise()
+    {
+        if (waypoints[0]?.type == Waypoint.wpType.CRUISING)
+        {
+            waypoints.RemoveAt(0);
+        }
+    }
+
+    /// <summary>
+            /// Inserts a cruising waypoint or edits the existing one in a way that it will not interrupt normal operation
+            /// </summary>
+            /// <param name="pos">The position for SAM to move to to maintain a cruise altitude</param>
+    private static void SetCruisePos(Vector3D pos)
+    {
+        Waypoint wp = new Waypoint(new Stance(pos, Vector3D.Zero, Vector3D.Zero), CONVERGING_SPEED, Waypoint.wpType.CRUISING);
+
+        switch (waypoints[0].type)
+        {
+            case Waypoint.wpType.CRUISING:
+                waypoints[0] = wp;
+                return;
+            case Waypoint.wpType.CONVERGING:
+                waypoints.Insert(0, wp);
+                return;
+            case Waypoint.wpType.NAVIGATING:
+                if (waypoints[1].type == Waypoint.wpType.CRUISING)
+                {
+                    waypoints[1] = wp;
+                }
+                else if(waypoints[1].type == Waypoint.wpType.CONVERGING)
+                {
+                    waypoints.Insert(1, wp);
+                }
+                return;
+            default:
+                return;
+        }
+    }
     public static void ResetArrival()
     {
         IsClose = false;
@@ -932,6 +1050,7 @@ public static class Navigation
         {
             ProcessCloseness();
         }
+        ProcessAutoCruise();
         CheckColision();
         Guidance.Set(waypoints.ElementAt(0));
         Guidance.Tick();
@@ -1056,7 +1175,7 @@ public static class Pilot
         bool reversedConnector = Block.HasProperty(connector.EntityId, CONNECTOR_REVERSE_TAG);
         Situation.RefreshParameters();
         connectorToCenter = Situation.position - connector.GetPosition();
-        if (Math.Abs(Vector3D.Dot(dock[0].stance.forward, Situation.gravityUpVector)) < 0.5f)
+        if ((Situation.inGravity || Situation.turnNoseUp) && Math.Abs(Vector3D.Dot(dock[0].stance.forward, Situation.gravityUpVector)) < 0.5f)
         {
             up = Situation.gravityUpVector;
             referenceUp = connector.WorldMatrix.GetDirectionVector(connector.WorldMatrix.GetClosestDirection(up));
@@ -2398,8 +2517,8 @@ public static class Profiles
     private static string[] connectorTags = new string[] { CONNECTOR_REVERSE_TAG };
     private static string[] cockpitAttributes = new string[] { "Slot" };
     private static string[] pbAttributes = new string[] { "Name", "Speed", "Wait" , TAXI_SPEED_TAG, CONVERGING_SPEED_TAG, APPROACH_DISTANCE_TAG, DOCK_DISTANCE_TAG,
-    DOCK_SPEED_TAG, UNDOCK_DISTANCE_TAG, APPROACH_SPEED_TAG, APPROACH_SAFE_DISTANCE_TAG, ARRIVAL_SPEED_TAG, ARRIVAL_DISTANCE_TAG, ESCAPE_NOSE_UP_ELEVATION_TAG
-    };
+    DOCK_SPEED_TAG, UNDOCK_DISTANCE_TAG, APPROACH_SPEED_TAG, APPROACH_SAFE_DISTANCE_TAG, ARRIVAL_SPEED_TAG, ARRIVAL_DISTANCE_TAG, ESCAPE_NOSE_UP_ELEVATION_TAG,
+    AUTO_CRUISE_ATTRIBUTE};
     private static string[] namedAttributes = new string[] { "Name" };
     private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED", "STARTED", "UNDOCKED", "APPROACHING" };
     public static Dictionary<Type, BlockProfile> perType = new Dictionary<Type, BlockProfile> { { typeof(IMyRemoteControl),
@@ -2824,6 +2943,25 @@ public static class GridBlocks
                     Logger.Info("Escape nose up ground-to-air elevation changed to " + ESCAPE_NOSE_UP_ELEVATION);
                 }
             }
+        }
+
+        string dist = string.Empty;
+        double outDist = Situation.autoCruiseAltitude;
+        if (Block.GetProperty(terminalBlock.EntityId, AUTO_CRUISE_ATTRIBUTE, ref dist))
+        {
+            if (double.TryParse(dist, out outDist))
+            {
+                if (Situation.autoCruiseAltitude != (float)outDist)
+                {
+                    Situation.autoCruiseAltitude = (float)outDist;
+                    Logger.Info($"Autocruise set to {Situation.autoCruiseAltitude:N0}.");
+                }
+            }
+        }
+        else if(!double.IsNaN(Situation.autoCruiseAltitude))
+        {
+            Situation.autoCruiseAltitude = double.NaN;
+            Logger.Info("Autocruise disabled. Atmospheric flight might be slow.");
         }
 
         bool noseUp = Block.HasProperty(terminalBlock.EntityId, ESCAPE_NOSE_UP_TAG);
@@ -3801,7 +3939,7 @@ public static class Helper
     {
         var parts = str.Split(':');
         Vector3D v = Vector3D.Zero;
-        if (parts.Length != 6)
+        if (parts.Length != 7)
         {
             return v;
 
@@ -3864,7 +4002,10 @@ public class Waypoint
 {
     public Stance stance;
     public float maxSpeed;
-    public enum wpType { ALIGNING, DOCKING, UNDOCKING, CONVERGING, APPROACHING, NAVIGATING, TESTING, TAXIING };
+    [Flags]
+    public enum wpType { ALIGNING = 1 << 0, DOCKING = 1 << 1, UNDOCKING = 1 << 2,
+        CONVERGING = 1 << 3, APPROACHING = 1 << 4, NAVIGATING = 1 << 5, TESTING = 1 << 6,
+        TAXIING = 1 << 7, CRUISING = 1 << 8 };
     public wpType type;
     public Waypoint(Stance s, float m, wpType wt)
     {
@@ -3891,6 +4032,10 @@ public class Waypoint
 
             case wpType.TAXIING: return MSG_TAXIING;
 
+            case wpType.CRUISING: return String.Format(MSG_CRUISING_AT, Situation.autoCruiseAltitude, MathHelper.ToDegrees(Navigation.ClimbAngle));
+
+            default: break;
+
         }
         return "Testing...";
 
@@ -3901,7 +4046,7 @@ public class Waypoint
     {
         string[] segment = coordinates.Split(':');
         //Logger.Info($"GPS --- {coordinates}");
-        if (segment.Length == 6)
+        if (segment.Length == 7)
         {
             Waypoint wp = FromString(coordinates);
             Dock dock = Dock.NewDock(wp, segment[1]);
