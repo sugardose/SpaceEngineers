@@ -39,6 +39,12 @@
  * *		No more crashing into terrain when you destination is on the opposite side of the planet.
  * * - Updated GPS to use new format that Keen has changed. GPS will now work without workarounds.
  * * - Fixed misaligned dock jank that happened in space.
+ * * vMod 10.1.0:
+ * * - Fixed approach timer not firing
+ * * - Added the ability for connectors to be on subgrids as long as it's the same construct
+ * * - Optimized arrival slowdown to be more accurate
+ * * - Added separate nose up and nose down elevations
+ * * - Inertial dampeners will be deactivated when docking with a nonstatic grid
  * 
  * Commands (Arguments in Programmable Block)
  * -----------
@@ -70,7 +76,7 @@
 
 //Modified by SCBionicle
 // Sam's Autopilot Manager
-public static string VERSION = "2 vMod 10.0.0";
+public static string VERSION = "2 vMod 10.1.0";
 
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1653875433
@@ -113,7 +119,7 @@ public static string TAG = "SAM";
 
 private static float HORIZONT_CHECK_DISTANCE = 2000.0f;
 
-private static float MAX_SPEED = 95.0f; //Speed when navigating (this is done during collision avoidance, not actually top speed)
+private static float MAX_SPEED = 80.0f; //Speed when navigating (this is done during collision avoidance, not actually top speed)
                                         //^^ Tag: Speed
 
 private static float APPROACH_DISTANCE = 20.0f; //How close to approach the runway/landing pad
@@ -128,7 +134,7 @@ private static float APPROACH_SPEED = 2.5f; //how fast the ship moves to get to 
 
 private static float APPROACH_SAFE_DISTANCE = 5.0f; //how far away the ship hovers from the taxi points (Tag: Taxi_distance)
 
-private static float CONVERGING_SPEED = 10f; //How fast the ship should go when no objects are in the ship's path
+private static float CONVERGING_SPEED = 100f; //How fast the ship should go when no objects are in the ship's path
 
 private static float TAXIING_SPEED = 2.0f; //Speed of which the ship goes while taxiing to its connector (low speed recommended)
 
@@ -236,6 +242,8 @@ private const string ESCAPE_NOSE_UP_TAG = "ESCAPENOSEUP";
 
 private const string ESCAPE_NOSE_UP_ELEVATION_TAG = "Nose_up_elevation";
 
+private const string DESCEND_NOSE_DOWN_ELEVATION_TAG = "Nose_down_elevation";
+
 private const string SLOW_ON_APPROACH_TAG = "SLOWONAPPROACH"; //slows the ship to taxiing speed when closing in onto the runway or docking connector
 
 private const string ALLOW_DIRECT_ALIGNMENT_TAG = "ALLOWDIRECTALIGNMENT"; //In space, should the ship point directly at the destination on navigation started before taking off?
@@ -325,6 +333,8 @@ public static class Situation
     public static bool inGravity; //false when sufficiantly elevated above ground when "allowEscapeNoseUp" is turned on
 
     public static bool turnNoseUp; //true when in gravity but nose would be up
+
+    public static float noseDownElevation = ESCAPE_NOSE_UP_ELEVATION;
 
     public static bool allowEscapeNoseUp;
 
@@ -436,20 +446,35 @@ public static class Situation
         inGravity = naturalGravity.Length() >= 0.5;
         if (inGravity)
         {
-            seaElevationVelocity = Vector3D.Dot(Vector3D.Normalize(linearVelocity), Vector3D.Normalize(naturalGravity));
+            seaElevationVelocity = Vector3D.Dot(linearVelocity, -Vector3D.Normalize(naturalGravity));
         }
         if (allowEscapeNoseUp && inGravity)
         {
             double groundElevation = 0;
             RemoteControl.block.TryGetPlanetElevation(MyPlanetElevation.Surface, out groundElevation);
-            if (groundElevation > ESCAPE_NOSE_UP_ELEVATION)
+            if (seaElevationVelocity > 0)
             {
-                inGravity = false;
-                turnNoseUp = true;
+                if (groundElevation > ESCAPE_NOSE_UP_ELEVATION)
+                {
+                    inGravity = false;
+                    turnNoseUp = true;
+                }
+                else
+                {
+                    turnNoseUp = false;
+                }
             }
-            else
+            else if(seaElevationVelocity < 0)
             {
-                turnNoseUp = false;
+                if (groundElevation > noseDownElevation)
+                {
+                    inGravity = false;
+                    turnNoseUp = true;
+                }
+                else
+                {
+                    turnNoseUp = false;
+                }
             }
         }
         else
@@ -875,6 +900,16 @@ public static class Navigation
         }
     }
 
+    public static Waypoint NextWaypointOfType(Waypoint.wpType type)
+    {
+        foreach(Waypoint w in waypoints)
+        {
+            if (w.type == type)
+                return w;
+        }
+        return null;
+    }
+
     private static double altitudeGravityStart = 0;
     public static float ClimbAngle = 0;
     private static void ProcessAutoCruise()
@@ -891,7 +926,8 @@ public static class Navigation
 
         if(!double.IsNaN(Situation.autoCruiseAltitude) && inGravity) //Is autocruise enabled and are you in a gravity well?
         {
-            Vector3D ?desiredDock = Pilot.dock.Count>0 ? Pilot.dock[0]?.stance.position : null;
+            //Vector3D ?desiredDock = Pilot.dock.Count>0 ? Pilot.dock[0]?.stance.position : null;
+            Vector3D? desiredDock = NextWaypointOfType(Waypoint.wpType.CONVERGING)?.stance?.position;
             if (desiredDock == null)
             {
                 StopAutoCruise();
@@ -1010,15 +1046,16 @@ public static class Navigation
     {
         if (ArrivalWaypoint == null)
         {
-            foreach (Waypoint w in waypoints)
-            {
-                if (w.type == Waypoint.wpType.CONVERGING || w.type == Waypoint.wpType.NAVIGATING)
-                {
-                    ArrivalWaypoint = w;
+            ArrivalWaypoint = waypoints.Last(delegate (Waypoint w) { return w.type == Waypoint.wpType.CONVERGING; });
+            /*foreach (Waypoint w in waypoints)
+                    {
+                        if (w.type == Waypoint.wpType.CONVERGING || w.type == Waypoint.wpType.NAVIGATING)
+                        {
+                            ArrivalWaypoint = w;
 
-                    break;
-                }
-            }
+                            break;
+                        }
+                    }*/
             return false;
         }
         if (IsClose)
@@ -1029,6 +1066,7 @@ public static class Navigation
             if ((destination - Situation.position).Length() <= ARRIVAL_DISTANCE)
             {
                 Logger.Info("Slowing due to arriving at destination.");
+                Signal.Send(Signal.SignalType.APPROACH);
                 IsClose = true;
                 return true;
             }
@@ -2518,7 +2556,7 @@ public static class Profiles
     private static string[] cockpitAttributes = new string[] { "Slot" };
     private static string[] pbAttributes = new string[] { "Name", "Speed", "Wait" , TAXI_SPEED_TAG, CONVERGING_SPEED_TAG, APPROACH_DISTANCE_TAG, DOCK_DISTANCE_TAG,
     DOCK_SPEED_TAG, UNDOCK_DISTANCE_TAG, APPROACH_SPEED_TAG, APPROACH_SAFE_DISTANCE_TAG, ARRIVAL_SPEED_TAG, ARRIVAL_DISTANCE_TAG, ESCAPE_NOSE_UP_ELEVATION_TAG,
-    AUTO_CRUISE_ATTRIBUTE};
+    AUTO_CRUISE_ATTRIBUTE, DESCEND_NOSE_DOWN_ELEVATION_TAG};
     private static string[] namedAttributes = new string[] { "Name" };
     private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED", "STARTED", "UNDOCKED", "APPROACHING" };
     public static Dictionary<Type, BlockProfile> perType = new Dictionary<Type, BlockProfile> { { typeof(IMyRemoteControl),
@@ -2933,7 +2971,7 @@ public static class GridBlocks
             }
         }
 
-        if (Block.GetProperty(terminalBlock.EntityId, ESCAPE_NOSE_UP_ELEVATION_TAG, ref speed))
+        if (Block.GetProperty(terminalBlock.EntityId, ESCAPE_NOSE_UP_ELEVATION_TAG, ref speed) && Situation.allowEscapeNoseUp)
         {
             if (Int32.TryParse(speed, out speedInt))
             {
@@ -2943,6 +2981,25 @@ public static class GridBlocks
                     Logger.Info("Escape nose up ground-to-air elevation changed to " + ESCAPE_NOSE_UP_ELEVATION);
                 }
             }
+        }
+
+        if (Block.GetProperty(terminalBlock.EntityId, DESCEND_NOSE_DOWN_ELEVATION_TAG, ref speed) && Situation.allowEscapeNoseUp)
+        {
+            if (Int32.TryParse(speed, out speedInt))
+            {
+                if (Situation.noseDownElevation != (float)speedInt)
+                {
+                    Situation.noseDownElevation = (float)speedInt;
+                    Logger.Info($"Descend nose down ground-to-air elevation changed to {Situation.noseDownElevation:N0}");
+                }
+            }
+        }
+        else if (Situation.noseDownElevation != ESCAPE_NOSE_UP_ELEVATION && Situation.allowEscapeNoseUp)
+        {
+            Logger.Warn($"Nose down elevation not set. Matching nose up elevation...");
+            Logger.Info("Use the custom data to set nose up elevation");
+            Logger.Info($"Custom data reference: SAM.{DESCEND_NOSE_DOWN_ELEVATION_TAG}=<number>");
+            Situation.noseDownElevation = ESCAPE_NOSE_UP_ELEVATION;
         }
 
         string dist = string.Empty;
@@ -3081,7 +3138,7 @@ public void ScanGrid()
     foreach (IMyTerminalBlock block in GridBlocks.terminalBlocks)
     {
         //************** Remove Text Panel check if script breaks *************
-        if (block.CubeGrid != Me.CubeGrid && !(block is IMyTextPanel))
+        if (block.CubeGrid != Me.CubeGrid && !(block is IMyTextPanel) && !(block is IMyShipConnector))
         {
             //********** Uncomment below if script breaks ********
             continue;
@@ -3306,7 +3363,10 @@ public static class ConnectorControl
             if (connector.Status == MyShipConnectorStatus.Connected)
             {
                 connected = true;
-
+                if (!connector.OtherConnector.CubeGrid.IsStatic)
+                {
+                    RemoteControl.block.DampenersOverride = false;
+                }
             }
         }
         return connected;
