@@ -1,5 +1,6 @@
+#region mdk preserve
 // Sam's Autopilot Manager
-public static string VERSION = "2.6.6";
+public static string VERSION = "2.6.7";
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1653875433
 // 
@@ -7,6 +8,7 @@ public static string VERSION = "2.6.6";
 // Contributors: SCBionicle
 //
 // Latest changes:
+// - Fix block attribute capitalization.
 // - Allows selecting primary connector for docking with tag MAIN.
 // - Hacked around KEEN bug with surface GetText.
 // - Added Orbital dock. "ADD ORBIT" will add a dock at Orbit imeadiatelly above ship.
@@ -1812,7 +1814,7 @@ public static class Profiles {
 	private static string[] textPanelExclusiveTags = new string[] { "LOG", "NAV", "CONF", "DATA" };
 
 	private static string[] cockpitTags = new string[] { "OVR" };
-	public static string[] cockpitAttributes = new string[] { "PANEL0", "PANEL1", "PANEL2", "PANEL3", "PANEL4", "PANEL5", "PANEL6", "PANEL7", "PANEL8", "PANEL9" };
+	public static string[] cockpitAttributes = new string[] { "Panel0", "Panel1", "Panel2", "Panel3", "Panel4", "Panel5", "Panel6", "Panel7", "Panel8", "Panel9" };
 
 	private static string[] connectorTags = new string[] { "REV", "MAIN" };
 	private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED" };
@@ -2903,7 +2905,7 @@ public static class Helper {
 		if(string.IsNullOrEmpty(s)) {
 			return string.Empty;
 		}
-		return s.First().ToString().ToUpper() + s.Substring(1);
+		return s.First().ToString().ToUpper() + s.Substring(1).ToLower();
 	}
 	public static Vector3D UnserializeVector(string str) {
 		var parts = str.Split(':');
