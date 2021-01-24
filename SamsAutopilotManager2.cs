@@ -1,6 +1,5 @@
-#region mdk preserve
 // Sam's Autopilot Manager
-public static string VERSION = "2.6.5";
+public static string VERSION = "2.6.6";
 //
 // Documentation: http://steamcommunity.com/sharedfiles/filedetails/?id=1653875433
 // 
@@ -8,6 +7,7 @@ public static string VERSION = "2.6.5";
 // Contributors: SCBionicle
 //
 // Latest changes:
+// - Allows selecting primary connector for docking with tag MAIN.
 // - Hacked around KEEN bug with surface GetText.
 // - Added Orbital dock. "ADD ORBIT" will add a dock at Orbit imeadiatelly above ship.
 // - Hydrogen tanks can now be considered CARGO too, just add the tag [SAM CARGO];
@@ -1814,7 +1814,7 @@ public static class Profiles {
 	private static string[] cockpitTags = new string[] { "OVR" };
 	public static string[] cockpitAttributes = new string[] { "PANEL0", "PANEL1", "PANEL2", "PANEL3", "PANEL4", "PANEL5", "PANEL6", "PANEL7", "PANEL8", "PANEL9" };
 
-	private static string[] connectorTags = new string[] { "REV" };
+	private static string[] connectorTags = new string[] { "REV", "MAIN" };
 	private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED" };
 
 	public static string[] chargeAttributes = new string[] { "Full", "Empty" };
@@ -2319,6 +2319,11 @@ public static class ConnectorControl {
 	}
 	private static bool revConnector;
 	public static IMyShipConnector GetConnector(Dock refDock) {
+		foreach(IMyShipConnector connector in GridBlocks.shipConnectors) {
+			if(Block.HasProperty(connector.EntityId, "MAIN")) {
+				return connector;
+			}
+		}
 		if(Math.Abs(Vector3D.Dot(refDock.stance.forward, RemoteControl.block.WorldMatrix.Up)) < 0.5f) {
 			foreach(IMyShipConnector connector in GridBlocks.shipConnectors) {
 				revConnector = Block.HasProperty(connector.EntityId, "REV");
@@ -2355,7 +2360,7 @@ public static class Terminal {
 	private static System.Text.RegularExpressions.Match navMatch;
 	private static string DefaultScreen = "SAMv2 " + VERSION + " Terminal\n please write your command in the keyboard.";
 	private static string screenText = DefaultScreen;
-	private static System.Text.StringBuilder buffer = new System.Text.StringBuilder(); 
+	private static System.Text.StringBuilder buffer = new System.Text.StringBuilder();
 
 	public static void Reset() {
 		screen.ContentType = VRage.Game.GUI.TextPanel.ContentType.TEXT_AND_IMAGE;
@@ -2427,7 +2432,6 @@ public static class Terminal {
 		if(ParseNav(cmd.Skip(2).ToArray())) {
 			SendCmd(p, command);
 		}
-		Logger.Info("reset 1");
 		Reset();
 	}
 	private static ShipCommand shipCommand = new ShipCommand();
@@ -3126,4 +3130,3 @@ public class ShipCommand {
 	public string ShipName;
 	public List<NavCmd> navCmds = new List<NavCmd> { };
 }
-
