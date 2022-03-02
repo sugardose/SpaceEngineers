@@ -1817,7 +1817,7 @@ public static class Profiles {
 	public static string[] cockpitAttributes = new string[] { "Panel0", "Panel1", "Panel2", "Panel3", "Panel4", "Panel5", "Panel6", "Panel7", "Panel8", "Panel9" };
 
 	private static string[] connectorTags = new string[] { "REV", "MAIN" };
-	private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED" };
+	private static string[] timerTags = new string[] { "DOCKED", "NAVIGATED", "STARTED", "UNDOCKED" };
 
 	public static string[] chargeAttributes = new string[] { "Full", "Empty" };
 	private static string[] chargeTags = new string[] { "FORCE" };
